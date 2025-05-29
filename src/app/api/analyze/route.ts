@@ -17,6 +17,7 @@ const CACHE_TTL = 1800;
 // Update threshold in milliseconds (5 minutes)
 const UPDATE_THRESHOLD = 5 * 60 * 1000;
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 async function saveAnalysisToPostgres(lbPairAddress: string, analysisData: any) {
   const client = await pool.connect();
   try {

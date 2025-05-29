@@ -54,7 +54,9 @@ function generateIdentifier(type: string, inputMint?: string, maker?: string): s
 async function saveOrdersToPostgres(
   queryType: string,
   identifier: string,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   ordersData: any,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   analysisData: any
 ) {
   const client = await pool.connect();
