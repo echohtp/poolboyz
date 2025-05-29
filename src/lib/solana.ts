@@ -77,7 +77,7 @@ export class DLMMAnalyzer {
   }
 
   decodeLBPairAccount(accountData: Buffer): { tokenX: PublicKey; tokenY: PublicKey; binStep: number } {
-    const dataView = new DataView(accountData.buffer);
+    // const dataView = new DataView(accountData.buffer);
     let offset = 8; // Skip discriminator
     
     // Skip parameters struct (64 bytes)
