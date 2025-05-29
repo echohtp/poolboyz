@@ -78,6 +78,7 @@ export class DLMMAnalyzer {
 
   decodeLBPairAccount(accountData: Buffer): { tokenX: PublicKey; tokenY: PublicKey; binStep: number } {
     const dataView = new DataView(accountData.buffer);
+
     let offset = 8; // Skip discriminator
     
     // Skip parameters struct (64 bytes)
@@ -90,7 +91,7 @@ export class DLMMAnalyzer {
     offset += 4; // activeId
     
     // Read binStep (u16)
-    const binStep = dataView.getUint16(offset, true);
+    const binStep = accountData.subarray(offset, offset+2).readInt16LE(0);
     offset += 2;
     
     // Skip more fields
@@ -221,7 +222,8 @@ async getTokenPriceUSD(tokenMint: string) {
     
     for (let i = 0; i < maxBins; i++) {
       const liquidity = position.liquidityShares[i];
-      if (liquidity > BigInt(0)) {
+      if (liquidity > BigInt(0))
+      {
         const binId = position.lowerBinId + i;
         
         // Calculate base price using the bin formula
@@ -232,6 +234,13 @@ async getTokenPriceUSD(tokenMint: string) {
         const decimalAdjustment = Math.pow(10, decimalsY - decimalsX);
         const priceTokenXPerTokenY = basePriceForBin / decimalAdjustment;
         
+        /*
+        if (priceTokenXPerTokenY <= 0){
+          console.log("priceTokenXPerTokenY: " + priceTokenXPerTokenY + " | binId: " + binId);
+          console.log(basePriceForBin + " => " + decimalAdjustment + " | binStep: " + binStep);
+          console.log("maxBins: " + maxBins);
+        }*/
+
         // For bin ranges, each bin represents a specific price point
         // The "max price" for a bin is the price at the next bin
         const nextBinPrice = Math.pow(1 + binStep / 10000, binId + 1) / decimalAdjustment;
@@ -266,6 +275,13 @@ async getTokenPriceUSD(tokenMint: string) {
         const currentLiquidity = liquidityByBin.get(distribution.binId) || BigInt(0);
         liquidityByBin.set(distribution.binId, currentLiquidity + distribution.liquidity);
         priceByBin.set(distribution.binId, distribution.minPrice);
+
+        /*
+        if (distribution.minPrice<=0){
+            console.log("bin:" + distribution.binId + " => price: " + distribution.minPrice);
+            console.log(distribution);
+        }*/
+        
       }
     }
     

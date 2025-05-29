@@ -107,7 +107,7 @@ export default function Home() {
   };
 
   const hasUSDPricing = result?.liquidityData.some(item => item.priceUSD !== undefined);
-
+  
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-900 via-blue-900 to-purple-900">
       <div className="container mx-auto px-4 py-8 max-w-7xl">

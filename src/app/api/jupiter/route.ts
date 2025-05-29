@@ -3,8 +3,10 @@ import { JupiterOrderAnalyzer } from '../../../lib/jupiter';
 import Redis from 'ioredis';
 import { Pool } from 'pg';
 
+const dev_mode : boolean = (process.env.DEV_MODE=="1");
+
 // Initialize Redis client
-const redis = new Redis(`redis://${process.env.REDIS_USER}:${process.env.REDIS_PASSWORD}@${process.env.REDIS_URL}`);
+const redis = (dev_mode) ? null : new Redis(`redis://${process.env.REDIS_USER}:${process.env.REDIS_PASSWORD}@${process.env.REDIS_URL}`);
 
 // Initialize PostgreSQL pool
 const pool = new Pool({
@@ -131,64 +133,70 @@ export async function POST(req: Request) {
     let shouldPerformAnalysis = false;
     let cacheStatus = 'MISS';
 
-    // 1. Check Redis cache first
-    const cachedResult = await redis.get(cacheKey);
-    
-    if (cachedResult) {
-      const parsedResult = JSON.parse(cachedResult);
-      const lastUpdated = parsedResult.lastUpdated;
-      const now = Date.now();
+    if (redis==null){
+      shouldPerformAnalysis = true;
+    }
+    else
+    {
+      // 1. Check Redis cache first
+      const cachedResult = await redis.get(cacheKey);
       
-      // Check if data is still fresh (less than 3 minutes old)
-      if (lastUpdated && (now - lastUpdated) < UPDATE_THRESHOLD) {
-        console.log('Cache hit (fresh data) for Jupiter orders:', identifier);
-        return new Response(JSON.stringify(parsedResult), { 
-          status: 200,
-          headers: { 
-            'Content-Type': 'application/json',
-            'X-Cache': 'HIT' 
-          }
-        });
-      } else {
-        console.log('Cache expired (>3min old) for Jupiter orders:', identifier);
-        shouldPerformAnalysis = true;
-        cacheStatus = 'REFRESH';
-      }
-    } else {
-      // 2. If not in Redis, check PostgreSQL for recent data
-      console.log('Cache miss, checking PostgreSQL for Jupiter orders:', identifier);
-      const pgResult = await getLatestOrdersFromPostgres(type, identifier);
-      
-      if (pgResult) {
-        const updatedAt = new Date(pgResult.updated_at).getTime();
+      if (cachedResult) {
+        const parsedResult = JSON.parse(cachedResult);
+        const lastUpdated = parsedResult.lastUpdated;
         const now = Date.now();
         
-        if ((now - updatedAt) < UPDATE_THRESHOLD) {
-          // Recent data exists in PostgreSQL, use it and cache it
-          console.log('Found recent Jupiter orders data in PostgreSQL:', identifier);
-          const resultWithTimestamp = {
-            orders: pgResult.orders_data,
-            analysis: pgResult.analysis_data,
-            lastUpdated: updatedAt
-          };
-          
-          // Cache the PostgreSQL result
-          await redis.setex(cacheKey, CACHE_TTL, JSON.stringify(resultWithTimestamp));
-          
-          return new Response(JSON.stringify(resultWithTimestamp), { 
+        // Check if data is still fresh (less than 3 minutes old)
+        if (lastUpdated && (now - lastUpdated) < UPDATE_THRESHOLD) {
+          console.log('Cache hit (fresh data) for Jupiter orders:', identifier);
+          return new Response(JSON.stringify(parsedResult), { 
             status: 200,
             headers: { 
               'Content-Type': 'application/json',
-              'X-Cache': 'DB-HIT' 
+              'X-Cache': 'HIT' 
             }
           });
         } else {
+          console.log('Cache expired (>3min old) for Jupiter orders:', identifier);
           shouldPerformAnalysis = true;
-          cacheStatus = 'DB-REFRESH';
+          cacheStatus = 'REFRESH';
         }
       } else {
-        shouldPerformAnalysis = true;
-        cacheStatus = 'MISS';
+        // 2. If not in Redis, check PostgreSQL for recent data
+        console.log('Cache miss, checking PostgreSQL for Jupiter orders:', identifier);
+        const pgResult = await getLatestOrdersFromPostgres(type, identifier);
+        
+        if (pgResult) {
+          const updatedAt = new Date(pgResult.updated_at).getTime();
+          const now = Date.now();
+          
+          if ((now - updatedAt) < UPDATE_THRESHOLD) {
+            // Recent data exists in PostgreSQL, use it and cache it
+            console.log('Found recent Jupiter orders data in PostgreSQL:', identifier);
+            const resultWithTimestamp = {
+              orders: pgResult.orders_data,
+              analysis: pgResult.analysis_data,
+              lastUpdated: updatedAt
+            };
+            
+            // Cache the PostgreSQL result
+            await redis.setex(cacheKey, CACHE_TTL, JSON.stringify(resultWithTimestamp));
+            
+            return new Response(JSON.stringify(resultWithTimestamp), { 
+              status: 200,
+              headers: { 
+                'Content-Type': 'application/json',
+                'X-Cache': 'DB-HIT' 
+              }
+            });
+          } else {
+            shouldPerformAnalysis = true;
+            cacheStatus = 'DB-REFRESH';
+          }
+        } else {
+          shouldPerformAnalysis = true;
+          cacheStatus = 'MISS';
+        }
       }
     }
 
@@ -234,8 +242,10 @@ export async function POST(req: Request) {
       );
 
       // 5. Cache in Redis
-      await redis.setex(cacheKey, CACHE_TTL, JSON.stringify(resultWithTimestamp));
-      console.log('Fresh Jupiter orders result cached:', identifier);
+      if (redis!=null){
+        await redis.setex(cacheKey, CACHE_TTL, JSON.stringify(resultWithTimestamp));
+        console.log('Fresh Jupiter orders result cached:', identifier);
+      }
       
       return new Response(JSON.stringify(resultWithTimestamp), { 
         status: 200,
