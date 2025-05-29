@@ -1,10 +1,17 @@
 import { Connection, PublicKey } from '@solana/web3.js';
 import bs58 from 'bs58';
 
+const coinGeckoLookup: Record<string, string> = {
+  "So11111111111111111111111111111111111111112": "solana",
+  "DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263": "bonk",
+
+}
+
 export interface LiquidityData {
   binId: number;
   totalLiquidity: string; // Use string for BigInt serialization
   price: number;
+  priceUSD?: number;
 }
 
 export interface LBPairMetadata {
@@ -23,6 +30,10 @@ export interface AnalysisResult {
     activeBins: number;
     totalBins: number;
     priceRange: {
+      min: number;
+      max: number;
+    };
+    priceRangeUSD?: { // Optional USD price range from backend
       min: number;
       max: number;
     };
@@ -171,12 +182,36 @@ export class DLMMAnalyzer {
     };
   }
 
+
+  // Helper function to convert token prices to USD
+async convertToUSDPrice(
+  priceTokenXPerTokenY: number, 
+  tokenXMint: string, 
+  tokenYMint: string
+): Promise<{ priceTokenXUSD: number; priceTokenYUSD: number }> {
+  
+  const tokenXPriceUSD = await this.getTokenPriceUSD(tokenXMint);
+  const tokenYPriceUSD = await this.getTokenPriceUSD(tokenYMint);
+  
+  return {
+    priceTokenXUSD: tokenXPriceUSD,
+    priceTokenYUSD: tokenYPriceUSD
+  };
+}
+
+async getTokenPriceUSD(tokenMint: string) {
+  const _usdcPrice = await fetch(`https://api.coingecko.com/api/v3/simple/price?ids=${coinGeckoLookup[tokenMint]}&vs_currencies=usd`);
+  const tokenPriceUSD = await _usdcPrice.json();
+
+  return tokenPriceUSD[coinGeckoLookup[tokenMint]].usd;
+}
+
+
   calculatePositionPriceRange(position: {
     upperBinId: number;
     lowerBinId: number;
     liquidityShares: bigint[];
   }, binStep: number, decimalsX: number, decimalsY: number) {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const liquidityDistribution: any[] = [];
     let totalLiquidity = BigInt(0);
     
@@ -188,15 +223,25 @@ export class DLMMAnalyzer {
       if (liquidity > BigInt(0)) {
         const binId = position.lowerBinId + i;
         
-        const basePrice = Math.pow(1 + binStep / 10000, binId);
+        // Calculate base price using the bin formula
+        const basePriceForBin = Math.pow(1 + binStep / 10000, binId);
+        
+        // Apply decimal adjustment: tokenX/tokenY price
+        // Formula from Meteora docs: price = (1 + bin_step/10000)^bin_id / 10^(decimalsY - decimalsX)
         const decimalAdjustment = Math.pow(10, decimalsY - decimalsX);
-        const adjustedPrice = basePrice / decimalAdjustment;
+        const priceTokenXPerTokenY = basePriceForBin / decimalAdjustment;
+        
+        // For bin ranges, each bin represents a specific price point
+        // The "max price" for a bin is the price at the next bin
+        const nextBinPrice = Math.pow(1 + binStep / 10000, binId + 1) / decimalAdjustment;
         
         liquidityDistribution.push({
           binId,
           liquidity,
-          minPrice: adjustedPrice,
-          maxPrice: Math.pow(1 + binStep / 10000, binId + 1) / decimalAdjustment
+          // Price of tokenX in terms of tokenY
+          price: priceTokenXPerTokenY,
+          minPrice: priceTokenXPerTokenY,
+          maxPrice: nextBinPrice
         });
         
         totalLiquidity += liquidity;

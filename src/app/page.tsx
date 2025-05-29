@@ -9,6 +9,7 @@ export default function Home() {
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<AnalysisResult | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [showInUsdc, setShowInUsdc] = useState(false);
 
   const sampleAddresses = [
     {
@@ -27,9 +28,27 @@ export default function Home() {
       pair: 'HOUSE/USDC',
       address: '9V98cPfLchV8RWp5rScfidzrmTdo6bDKxCdSGmiGQSQJ'
     },
-    
-    
   ];
+
+  const formatLargeNumber = (num: string | number): string => {
+    const n = typeof num === 'string' ? Number(num) : num;
+    if (n === 0) return '0';
+    
+    if (n >= 1e12) return (n / 1e12).toFixed(2) + 'T';
+    if (n >= 1e9) return (n / 1e9).toFixed(2) + 'B';
+    if (n >= 1e6) return (n / 1e6).toFixed(2) + 'M';
+    if (n >= 1e3) return (n / 1e3).toFixed(2) + 'K';
+    
+    return n.toExponential(2);
+  };
+
+  const formatPrice = (price: number): string => {
+    if (price === 0) return '0';
+    if (price < 0.000001) return price.toExponential(3);
+    if (price < 0.01) return price.toFixed(6);
+    if (price < 1) return price.toFixed(4);
+    return price.toFixed(2);
+  };
 
   const handleAnalyze = async () => {
     if (!lbPairAddress.trim()) {
@@ -57,6 +76,7 @@ export default function Home() {
       }
 
       setResult(data);
+
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unknown error occurred');
     } finally {
@@ -64,21 +84,45 @@ export default function Home() {
     }
   };
 
+  const getDisplayData = () => {
+    if (!result) return [];
+    
+    return result.liquidityData.map(item => ({
+      ...item,
+      // Assuming backend provides both price and priceUSD fields
+      displayPrice: showInUsdc && item.priceUSD ? item.priceUSD : item.price
+    }));
+  };
+
+  const getPriceLabel = () => {
+    if (!result) return '';
+    
+    const tokenXShort = result.metadata.tokenX.slice(0, 8) + '...';
+    const tokenYShort = result.metadata.tokenY.slice(0, 8) + '...';
+    
+    if (showInUsdc) {
+      return `${tokenXShort} Price (USD)`;
+    }
+    return `${tokenXShort} per ${tokenYShort}`;
+  };
+
+  const hasUSDPricing = result?.liquidityData.some(item => item.priceUSD !== undefined);
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-900 via-blue-900 to-purple-900">
-      <div className="container mx-auto px-4 py-8">
+      <div className="container mx-auto px-4 py-8 max-w-7xl">
         {/* Header */}
-        <div className="text-center mb-12">
-          <h1 className="text-5xl font-bold bg-gradient-to-r from-blue-400 to-purple-600 bg-clip-text text-transparent mb-4">
+        <div className="text-center mb-8">
+          <h1 className="text-4xl md:text-5xl font-bold bg-gradient-to-r from-blue-400 to-purple-600 bg-clip-text text-transparent mb-4">
             🌊 DLMM Liquidity Analyzer
           </h1>
-          <p className="text-gray-300 text-xl">
+          <p className="text-gray-300 text-lg md:text-xl">
             Analyze Meteora DLMM pool liquidity distribution in real-time
           </p>
         </div>
 
         {/* Input Section */}
-        <div className="bg-white/5 backdrop-blur-lg rounded-2xl border border-white/10 p-8 mb-8">
+        <div className="bg-white/5 backdrop-blur-lg rounded-2xl border border-white/10 p-6 md:p-8 mb-8">
           <div className="flex flex-col md:flex-row gap-4">
             <div className="flex-1">
               <label htmlFor="lbPairAddress" className="block text-white font-semibold mb-2">
@@ -97,7 +141,7 @@ export default function Home() {
             <button
               onClick={handleAnalyze}
               disabled={loading}
-              className="px-8 py-3 bg-gradient-to-r from-blue-500 to-purple-600 text-white font-semibold rounded-lg hover:from-blue-600 hover:to-purple-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200 transform hover:scale-105"
+              className="px-8 py-3 bg-gradient-to-r from-blue-500 to-purple-600 text-white font-semibold rounded-lg hover:from-blue-600 hover:to-purple-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200 transform hover:scale-105 whitespace-nowrap"
             >
               {loading ? 'Analyzing...' : 'Analyze'}
             </button>
@@ -106,7 +150,7 @@ export default function Home() {
           {/* Sample Addresses */}
           <div className="mt-6">
             <h4 className="text-white font-semibold mb-3">📋 Sample LB Pair Addresses:</h4>
-            <div className="space-y-2">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
               {sampleAddresses.map((sample, index) => (
                 <div
                   key={index}
@@ -114,7 +158,9 @@ export default function Home() {
                   className="flex justify-between items-center p-3 bg-black/20 rounded-lg cursor-pointer hover:bg-black/30 transition-colors"
                 >
                   <span className="text-blue-400 font-semibold">{sample.pair}</span>
-                  <span className="text-gray-400 font-mono text-sm">{sample.address}</span>
+                  <span className="text-gray-400 font-mono text-sm truncate ml-2">
+                    {sample.address.slice(0, 20)}...
+                  </span>
                 </div>
               ))}
             </div>
@@ -138,81 +184,127 @@ export default function Home() {
         {result && (
           <div className="space-y-8">
             {/* Metadata */}
-            <div className="bg-white/5 backdrop-blur-lg rounded-2xl border border-white/10 p-8">
+            <div className="bg-white/5 backdrop-blur-lg rounded-2xl border border-white/10 p-6 md:p-8">
               <h3 className="text-2xl font-bold text-white mb-6 text-center">📊 Pool Metadata</h3>
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
-                <div className="text-center">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 md:gap-6">
+                <div className="text-center p-4 bg-black/20 rounded-lg">
                   <div className="text-gray-400 text-sm mb-1">Token X</div>
-                  <div className="text-blue-400 font-semibold">
-                    {result.metadata.tokenX.slice(0, 8)}...
+                  <div className="text-blue-400 font-semibold text-xs break-all">
+                    {result.metadata.tokenX.slice(0, 12)}...
                   </div>
                 </div>
-                <div className="text-center">
+                <div className="text-center p-4 bg-black/20 rounded-lg">
                   <div className="text-gray-400 text-sm mb-1">Token Y</div>
-                  <div className="text-blue-400 font-semibold">
-                    {result.metadata.tokenY.slice(0, 8)}...
+                  <div className="text-blue-400 font-semibold text-xs break-all">
+                    {result.metadata.tokenY.slice(0, 12)}...
                   </div>
                 </div>
-                <div className="text-center">
+                <div className="text-center p-4 bg-black/20 rounded-lg">
                   <div className="text-gray-400 text-sm mb-1">Bin Step</div>
                   <div className="text-blue-400 font-semibold">
                     {result.metadata.binStep} ({(result.metadata.binStep / 100).toFixed(2)}%)
                   </div>
                 </div>
-                <div className="text-center">
+                <div className="text-center p-4 bg-black/20 rounded-lg">
                   <div className="text-gray-400 text-sm mb-1">Decimals</div>
                   <div className="text-blue-400 font-semibold">
                     {result.metadata.decimalsX}/{result.metadata.decimalsY}
                   </div>
                 </div>
-                <div className="text-center">
+                <div className="text-center p-4 bg-black/20 rounded-lg">
                   <div className="text-gray-400 text-sm mb-1">Price Range</div>
-                  <div className="text-blue-400 font-semibold">
-                    ${result.stats.priceRange.min.toFixed(6)} - ${result.stats.priceRange.max.toFixed(6)}
+                  <div className="text-blue-400 font-semibold text-xs">
+                    {formatPrice(showInUsdc && result.stats.priceRangeUSD ? 
+                      result.stats.priceRangeUSD.min : 
+                      result.stats.priceRange.min
+                    )} - {formatPrice(showInUsdc && result.stats.priceRangeUSD ? 
+                      result.stats.priceRangeUSD.max : 
+                      result.stats.priceRange.max
+                    )}
                   </div>
                 </div>
-                <div className="text-center">
+                <div className="text-center p-4 bg-black/20 rounded-lg">
                   <div className="text-gray-400 text-sm mb-1">Active Bins</div>
                   <div className="text-blue-400 font-semibold">
                     {result.stats.activeBins}/{result.stats.totalBins}
                   </div>
                 </div>
-                <div className="text-center">
+                <div className="text-center p-4 bg-black/20 rounded-lg col-span-1 sm:col-span-2">
                   <div className="text-gray-400 text-sm mb-1">Total Liquidity</div>
                   <div className="text-blue-400 font-semibold">
-                    {Number(result.stats.totalLiquidity).toExponential(2)}
+                    {formatLargeNumber(result.stats.totalLiquidity)}
                   </div>
                 </div>
               </div>
+              
+              {/* USD Price Toggle - Only show if USD pricing is available */}
+              {hasUSDPricing && (
+                <div className="flex justify-center items-center mt-6 space-x-4">
+                  <span className="text-sm font-medium text-gray-300">
+                    Relative Price
+                  </span>
+                  <label className="inline-flex items-center cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={showInUsdc}
+                      onChange={(e) => setShowInUsdc(e.target.checked)}
+                      className="sr-only peer"
+                    />
+                    <div className="relative w-11 h-6 bg-gray-700 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-800 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
+                  </label>
+                  <span className="text-sm font-medium text-gray-300">USD Price</span>
+                </div>
+              )}
             </div>
 
             {/* Charts */}
             <div className="space-y-8">
-              <div className="bg-white/5 backdrop-blur-lg rounded-2xl border border-white/10 p-8">
-                <h3 className="text-xl font-bold text-white mb-4 text-center">📈 Liquidity Distribution Histogram</h3>
-                <LiquidityChart 
-                  data={result.liquidityData} 
-                  type="histogram" 
-                  title="Liquidity by Price Level"
-                />
+              <div className="bg-white/5 backdrop-blur-lg rounded-2xl border border-white/10 p-6 md:p-8">
+                <h3 className="text-xl font-bold text-white mb-4 text-center">
+                  📈 Liquidity Distribution Histogram
+                </h3>
+                <p className="text-gray-400 text-sm text-center mb-4">
+                  X-axis: {getPriceLabel()}
+                </p>
+                <div className="h-64 md:h-80">
+                  <LiquidityChart 
+                    data={getDisplayData()}
+                    type="histogram" 
+                    title="Liquidity by Price Level"
+                  />
+                </div>
               </div>
 
-              <div className="bg-white/5 backdrop-blur-lg rounded-2xl border border-white/10 p-8">
-                <h3 className="text-xl font-bold text-white mb-4 text-center">🔥 Liquidity Heatmap</h3>
-                <LiquidityChart 
-                  data={result.liquidityData} 
-                  type="heatmap" 
-                  title="Liquidity Intensity Distribution"
-                />
+              <div className="bg-white/5 backdrop-blur-lg rounded-2xl border border-white/10 p-6 md:p-8">
+                <h3 className="text-xl font-bold text-white mb-4 text-center">
+                  🔥 Liquidity Heatmap
+                </h3>
+                <p className="text-gray-400 text-sm text-center mb-4">
+                  X-axis: {getPriceLabel()}
+                </p>
+                <div className="h-64 md:h-80">
+                  <LiquidityChart 
+                    data={getDisplayData()}
+                    type="heatmap" 
+                    title="Liquidity Intensity Distribution"
+                  />
+                </div>
               </div>
 
-              <div className="bg-white/5 backdrop-blur-lg rounded-2xl border border-white/10 p-8">
-                <h3 className="text-xl font-bold text-white mb-4 text-center">📊 Cumulative Liquidity</h3>
-                <LiquidityChart 
-                  data={result.liquidityData} 
-                  type="cumulative" 
-                  title="Individual vs Cumulative Liquidity"
-                />
+              <div className="bg-white/5 backdrop-blur-lg rounded-2xl border border-white/10 p-6 md:p-8">
+                <h3 className="text-xl font-bold text-white mb-4 text-center">
+                  📊 Cumulative Liquidity
+                </h3>
+                <p className="text-gray-400 text-sm text-center mb-4">
+                  X-axis: {getPriceLabel()}
+                </p>
+                <div className="h-64 md:h-80">
+                  <LiquidityChart 
+                    data={getDisplayData()}
+                    type="cumulative" 
+                    title="Individual vs Cumulative Liquidity"
+                  />
+                </div>
               </div>
             </div>
 

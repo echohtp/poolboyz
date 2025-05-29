@@ -5,7 +5,6 @@ import { Pool } from 'pg';
 // Initialize Redis client
 const redis = new Redis(`redis://${process.env.REDIS_USER}:${process.env.REDIS_PASSWORD}@${process.env.REDIS_URL}`);
 
-
 // Initialize PostgreSQL pool
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
@@ -17,16 +16,26 @@ const CACHE_TTL = 1800;
 // Update threshold in milliseconds (5 minutes)
 const UPDATE_THRESHOLD = 5 * 60 * 1000;
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-async function saveAnalysisToPostgres(lbPairAddress: string, analysisData: any) {
+// Consistent data structure for storage
+interface StoredAnalysisData {
+  lbPairAddress: string;
+  analysisResult: any; // Your AnalysisResult type
+  lastUpdated: number;
+  createdAt: number;
+}
+
+async function saveAnalysisToPostgres(lbPairAddress: string, analysisData: StoredAnalysisData) {
   const client = await pool.connect();
   try {
     const query = `
       INSERT INTO dlmm_analyses (lb_pair_address, analysis_data)
       VALUES ($1, $2)
-      RETURNING id, created_at
+      RETURNING id, created_at, updated_at
     `;
-    const result = await client.query(query, [lbPairAddress, JSON.stringify(analysisData)]);
+    const result = await client.query(query, [
+      lbPairAddress, 
+      JSON.stringify(analysisData)
+    ]);
     console.log('Saved to PostgreSQL:', result.rows[0]);
     return result.rows[0];
   } catch (error) {
@@ -37,24 +46,50 @@ async function saveAnalysisToPostgres(lbPairAddress: string, analysisData: any) 
   }
 }
 
-async function getLatestAnalysisFromPostgres(lbPairAddress: string) {
+async function getLatestAnalysisFromPostgres(lbPairAddress: string): Promise<StoredAnalysisData | null> {
   const client = await pool.connect();
   try {
-    const query = `
-      SELECT analysis_data, created_at
-      FROM dlmm_analyses 
-      WHERE lb_pair_address = $1 
-      ORDER BY created_at DESC 
-      LIMIT 1
-    `;
+    // Use the custom function we created
+    const query = `SELECT * FROM get_latest_analysis($1)`;
     const result = await client.query(query, [lbPairAddress]);
-    return result.rows[0] || null;
+    
+    if (result.rows[0]) {
+      const storedData = JSON.parse(result.rows[0].analysis_data) as StoredAnalysisData;
+      return storedData;
+    }
+    
+    return null;
   } catch (error) {
     console.error('PostgreSQL fetch error:', error);
     return null;
   } finally {
     client.release();
   }
+}
+
+
+// Helper function to create consistent storage format
+function createStoredData(lbPairAddress: string, analysisResult: any): StoredAnalysisData {
+  const now = Date.now();
+  return {
+    lbPairAddress,
+    analysisResult,
+    lastUpdated: now,
+    createdAt: now
+  };
+}
+
+// Helper function to extract response data
+function extractResponseData(storedData: StoredAnalysisData) {
+  return {
+    ...storedData.analysisResult,
+    lastUpdated: storedData.lastUpdated,
+    _metadata: {
+      lbPairAddress: storedData.lbPairAddress,
+      lastUpdated: storedData.lastUpdated,
+      createdAt: storedData.createdAt
+    }
+  };
 }
 
 export async function POST(request: Request) {
@@ -73,14 +108,13 @@ export async function POST(request: Request) {
     const cachedResult = await redis.get(cacheKey);
     
     if (cachedResult) {
-      const parsedResult = JSON.parse(cachedResult);
-      const lastUpdated = parsedResult.lastUpdated;
+      const storedData: StoredAnalysisData = JSON.parse(cachedResult);
       const now = Date.now();
       
       // Check if data is still fresh (less than 5 minutes old)
-      if (lastUpdated && (now - lastUpdated) < UPDATE_THRESHOLD) {
+      if (storedData.lastUpdated && (now - storedData.lastUpdated) < UPDATE_THRESHOLD) {
         console.log('Cache hit (fresh data) for:', body.lbPairAddress);
-        return Response.json(parsedResult, { 
+        return Response.json(extractResponseData(storedData), { 
           status: 200,
           headers: { 'X-Cache': 'HIT' }
         });
@@ -92,24 +126,19 @@ export async function POST(request: Request) {
     } else {
       // 2. If not in Redis, check PostgreSQL for recent data
       console.log('Cache miss, checking PostgreSQL for:', body.lbPairAddress);
-      const pgResult = await getLatestAnalysisFromPostgres(body.lbPairAddress);
+      const storedData = await getLatestAnalysisFromPostgres(body.lbPairAddress);
       
-      if (pgResult) {
-        const createdAt = new Date(pgResult.created_at).getTime();
+      if (storedData) {
         const now = Date.now();
         
-        if ((now - createdAt) < UPDATE_THRESHOLD) {
+        if ((now - storedData.lastUpdated) < UPDATE_THRESHOLD) {
           // Recent data exists in PostgreSQL, use it and cache it
           console.log('Found recent data in PostgreSQL for:', body.lbPairAddress);
-          const resultWithTimestamp = {
-            ...pgResult.analysis_data,
-            lastUpdated: createdAt
-          };
           
-          // Cache the PostgreSQL result
-          await redis.setex(cacheKey, CACHE_TTL, JSON.stringify(resultWithTimestamp));
+          // Cache the PostgreSQL result in Redis
+          await redis.setex(cacheKey, CACHE_TTL, JSON.stringify(storedData));
           
-          return Response.json(resultWithTimestamp, { 
+          return Response.json(extractResponseData(storedData), { 
             status: 200,
             headers: { 'X-Cache': 'DB-HIT' }
           });
@@ -128,23 +157,21 @@ export async function POST(request: Request) {
       console.log('Performing fresh analysis for:', body.lbPairAddress);
       
       const analyzer = new DLMMAnalyzer();
-      const result = await analyzer.analyzeLBPair(body.lbPairAddress);
+      const analysisResult = await analyzer.analyzeLBPair(body.lbPairAddress);
       
-      const resultWithTimestamp = {
-        ...result,
-        lastUpdated: Date.now()
-      };
+      // Create consistent storage format
+      const storedData = createStoredData(body.lbPairAddress, analysisResult);
 
       // 4. Save to PostgreSQL (fire and forget - don't block response)
-      saveAnalysisToPostgres(body.lbPairAddress, result).catch(err => 
+      saveAnalysisToPostgres(body.lbPairAddress, storedData).catch(err => 
         console.error('Failed to save to PostgreSQL:', err)
       );
 
-      // 5. Cache in Redis
-      await redis.setex(cacheKey, CACHE_TTL, JSON.stringify(resultWithTimestamp));
+      // 5. Cache in Redis with consistent format
+      await redis.setex(cacheKey, CACHE_TTL, JSON.stringify(storedData));
       console.log('Fresh result cached for:', body.lbPairAddress);
       
-      return Response.json(resultWithTimestamp, { 
+      return Response.json(extractResponseData(storedData), { 
         status: 200,
         headers: { 'X-Cache': cacheStatus }
       });
@@ -155,13 +182,10 @@ export async function POST(request: Request) {
     
     // Fallback: try to get any recent data from PostgreSQL
     try {
-      const pgResult = await getLatestAnalysisFromPostgres(body.lbPairAddress);
-      if (pgResult) {
+      const storedData = await getLatestAnalysisFromPostgres(body.lbPairAddress);
+      if (storedData) {
         console.log('Returning PostgreSQL fallback data for:', body.lbPairAddress);
-        return Response.json({
-          ...pgResult.analysis_data,
-          lastUpdated: new Date(pgResult.created_at).getTime()
-        }, { 
+        return Response.json(extractResponseData(storedData), { 
           status: 200,
           headers: { 'X-Cache': 'DB-FALLBACK' }
         });
@@ -202,5 +226,28 @@ export async function DELETE(request: Request) {
     return Response.json({ 
       error: error instanceof Error ? error.message : 'Delete failed' 
     }, { status: 500 });
+  }
+}
+
+// Optional: Health check endpoint
+export async function HEAD() {
+  try {
+    // Test Redis connection
+    await redis.ping();
+    
+    // Test PostgreSQL connection
+    const client = await pool.connect();
+    await client.query('SELECT 1');
+    client.release();
+    
+    return new Response(null, { 
+      status: 200,
+      headers: { 'X-Health': 'OK' }
+    });
+  } catch (error) {
+    return new Response(null, { 
+      status: 503,
+      headers: { 'X-Health': 'ERROR' }
+    });
   }
 }
