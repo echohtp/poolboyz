@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@solana/web3.js": "^1.98.2",
+    "bs58": "^6.0.0",
     "chart.js": "^4.4.9",
     "next": "15.3.2",
     "react": "^19.0.0",
