@@ -90,7 +90,7 @@ export class DLMMAnalyzer {
     offset += 4; // activeId
     
     // Read binStep (u16)
-    const binStep = dataView.getUint16(offset, true);
+    const binStep = accountData.subarray(offset, offset+2).readInt16LE(0);
     offset += 2;
     
     // Skip more fields
