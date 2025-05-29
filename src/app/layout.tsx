@@ -17,7 +17,7 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en">
-      <nav className="bg-black/20 backdrop-blur-lg border-b border-white/10">
+      <nav className="bg-black/80 backdrop-blur-lg border-b border-white/10">
           <div className="container mx-auto px-4">
             <div className="flex items-center justify-between h-16">
               <div className="text-white font-bold text-xl">DeFi Analyzer</div>

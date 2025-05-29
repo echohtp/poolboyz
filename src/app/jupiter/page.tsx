@@ -2,6 +2,7 @@
 
 import React, { useState } from 'react';
 import JupiterOrderChart from '../components/JupiterOrderChart';
+import { OrderWithPrice } from '@/lib/jupiter';
 
 interface OrderAnalysis {
   totalOrders: number;
@@ -41,7 +42,11 @@ export default function JupiterPage() {
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<OrderResult | null>(null);
   const [error, setError] = useState<string | null>(null);
-
+  const [currentPage, setCurrentPage] = useState(1);
+  const itemsPerPage = 20;
+  const [sortConfig, setSortConfig] = useState<{ key: string; direction: 'asc' | 'desc' }>({ key: 'pubkey', direction: 'asc' });
+  const [sortedOrders, setSortedOrders] = useState<OrderWithPrice[]>([]);
+  
   const knownTokens = [
     { symbol: 'SOL', mint: 'So11111111111111111111111111111111111111112' },
     { symbol: 'USDC', mint: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v' },
@@ -53,6 +58,34 @@ export default function JupiterPage() {
     '232PpcrPc6Kz7geafvbRzt5HnHP4kX88yvzUCN69WXQC',
     '9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM',
   ];
+
+  const handleSort = (key: string) => {
+    setSortConfig(prev => ({
+      key,
+      direction: prev.key === key && prev.direction === 'asc' ? 'desc' : 'asc'
+    }));
+    setSortedOrders(prev => [...prev].sort((a, b) => {
+      if (key === 'making') {
+        return sortConfig.direction === 'asc' ? a.makingAmountAdjusted - b.makingAmountAdjusted : b.makingAmountAdjusted - a.makingAmountAdjusted;
+      }
+      if (key === 'taking') {
+        return sortConfig.direction === 'asc' ? a.takingAmountAdjusted - b.takingAmountAdjusted : b.takingAmountAdjusted - a.takingAmountAdjusted;  
+      }
+      if (key === 'price') {
+        return sortConfig.direction === 'asc' ? a.pricePerInputToken - b.pricePerInputToken : b.pricePerInputToken - a.pricePerInputToken;
+      }
+      if (key === 'status') {
+        return sortConfig.direction === 'asc' ? a.status.localeCompare(b.status) : b.status.localeCompare(a.status);    
+      }
+      if (key === 'filled') {
+        return sortConfig.direction === 'asc' ? a.filledPercentage - b.filledPercentage : b.filledPercentage - a.filledPercentage;
+      }
+      if (key === 'fee') {
+        return sortConfig.direction === 'asc' ? a.feeBps - b.feeBps : b.feeBps - a.feeBps;
+      }
+      return 0;
+    }));
+  };
 
   const handleAnalyze = async () => {
     if (queryType === 'inputMint' && !inputMint.trim()) {
@@ -92,6 +125,27 @@ export default function JupiterPage() {
       }
 
       setResult(data);
+      setSortedOrders(data.orders.sort((a: OrderWithPrice, b: OrderWithPrice) => {
+        if (sortConfig.key === 'making') {
+          return sortConfig.direction === 'asc' ? a.makingAmountAdjusted - b.makingAmountAdjusted : b.makingAmountAdjusted - a.makingAmountAdjusted;
+        }
+        if (sortConfig.key === 'taking') {
+          return sortConfig.direction === 'asc' ? a.takingAmountAdjusted - b.takingAmountAdjusted : b.takingAmountAdjusted - a.takingAmountAdjusted;
+        }
+        if (sortConfig.key === 'price') {
+          return sortConfig.direction === 'asc' ? a.pricePerInputToken - b.pricePerInputToken : b.pricePerInputToken - a.pricePerInputToken;
+        }
+        if (sortConfig.key === 'status') {
+          return sortConfig.direction === 'asc' ? a.status.localeCompare(b.status) : b.status.localeCompare(a.status);
+        }
+        if (sortConfig.key === 'filled') {
+          return sortConfig.direction === 'asc' ? a.filledPercentage - b.filledPercentage : b.filledPercentage - a.filledPercentage;
+        }
+        if (sortConfig.key === 'fee') {
+          return sortConfig.direction === 'asc' ? a.feeBps - b.feeBps : b.feeBps - a.feeBps;
+        }
+        return 0;
+      }));
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unknown error occurred');
     } finally {
@@ -365,16 +419,30 @@ export default function JupiterPage() {
                     <tr className="border-b border-white/10">
                       <th className="text-left text-white font-semibold py-3 px-2">Order ID</th>
                       <th className="text-left text-white font-semibold py-3 px-2">Pair</th>
-                      <th className="text-right text-white font-semibold py-3 px-2">Making</th>
-                      <th className="text-right text-white font-semibold py-3 px-2">Taking</th>
-                      <th className="text-right text-white font-semibold py-3 px-2">Price</th>
-                      <th className="text-center text-white font-semibold py-3 px-2">Status</th>
-                      <th className="text-right text-white font-semibold py-3 px-2">Filled %</th>
-                      <th className="text-right text-white font-semibold py-3 px-2">Fee (bps)</th>
+                      <th className="text-right text-white font-semibold py-3 px-2 cursor-pointer hover:text-purple-400" onClick={() => handleSort('making')}>
+                        Making {sortConfig.key === 'making' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
+                      </th>
+                      <th className="text-right text-white font-semibold py-3 px-2 cursor-pointer hover:text-purple-400" onClick={() => handleSort('taking')}>
+                        Taking {sortConfig.key === 'taking' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
+                      </th>
+                      <th className="text-right text-white font-semibold py-3 px-2 cursor-pointer hover:text-purple-400" onClick={() => handleSort('price')}>
+                        Price {sortConfig.key === 'price' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
+                      </th>
+                      <th className="text-center text-white font-semibold py-3 px-2 cursor-pointer hover:text-purple-400" onClick={() => handleSort('status')}>
+                        Status {sortConfig.key === 'status' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
+                      </th>
+                      <th className="text-right text-white font-semibold py-3 px-2 cursor-pointer hover:text-purple-400" onClick={() => handleSort('filled')}>
+                        Filled % {sortConfig.key === 'filled' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
+                      </th>
+                      <th className="text-right text-white font-semibold py-3 px-2 cursor-pointer hover:text-purple-400" onClick={() => handleSort('fee')}>
+                        Fee (bps) {sortConfig.key === 'fee' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
+                      </th>
                     </tr>
                   </thead>
                   <tbody>
-                    {result.orders.slice(0, 20).map((order) => (
+                    {sortedOrders
+                      .slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage)
+                      .map((order) => (
                       <tr key={order.pubkey} className="border-b border-white/5 hover:bg-white/5 transition-colors">
                         <td className="py-3 px-2 text-gray-300 font-mono text-xs">
                           {order.pubkey.slice(0, 8)}...
@@ -407,11 +475,36 @@ export default function JupiterPage() {
                   </tbody>
                 </table>
                 
-                {result.orders.length > 20 && (
-                  <div className="mt-4 text-center text-gray-400">
-                    Showing 20 of {result.orders.length} orders
+                {/* Pagination Controls */}
+                <div className="mt-6 flex items-center justify-between">
+                  <div className="text-gray-400 text-sm">
+                    Showing {((currentPage - 1) * itemsPerPage) + 1} to {Math.min(currentPage * itemsPerPage, result.orders.length)} of {result.orders.length} orders
                   </div>
-                )}
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
+                      disabled={currentPage === 1}
+                      className={`px-3 py-1 rounded border ${
+                        currentPage === 1 
+                          ? 'border-gray-700 text-gray-600 cursor-not-allowed' 
+                          : 'border-white/20 text-white hover:bg-white/10'
+                      }`}
+                    >
+                      Previous
+                    </button>
+                    <button
+                      onClick={() => setCurrentPage(prev => Math.min(Math.ceil(result.orders.length / itemsPerPage), prev + 1))}
+                      disabled={currentPage >= Math.ceil(result.orders.length / itemsPerPage)}
+                      className={`px-3 py-1 rounded border ${
+                        currentPage >= Math.ceil(result.orders.length / itemsPerPage)
+                          ? 'border-gray-700 text-gray-600 cursor-not-allowed' 
+                          : 'border-white/20 text-white hover:bg-white/10'
+                      }`}
+                    >
+                      Next
+                    </button>
+                  </div>
+                </div>
               </div>
             </div>
 
