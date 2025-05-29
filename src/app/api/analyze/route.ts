@@ -19,6 +19,7 @@ const UPDATE_THRESHOLD = 5 * 60 * 1000;
 // Consistent data structure for storage
 interface StoredAnalysisData {
   lbPairAddress: string;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   analysisResult: any; // Your AnalysisResult type
   lastUpdated: number;
   createdAt: number;
@@ -67,8 +68,8 @@ async function getLatestAnalysisFromPostgres(lbPairAddress: string): Promise<Sto
   }
 }
 
-
 // Helper function to create consistent storage format
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 function createStoredData(lbPairAddress: string, analysisResult: any): StoredAnalysisData {
   const now = Date.now();
   return {
@@ -204,50 +205,3 @@ export async function GET() {
   return Response.json({ error: 'Method not allowed' }, { status: 405 });
 }
 
-// Optional: Add a cleanup endpoint for old data
-export async function DELETE(request: Request) {
-  const { searchParams } = new URL(request.url);
-  const daysOld = parseInt(searchParams.get('days') || '30');
-  
-  try {
-    const client = await pool.connect();
-    const query = `
-      DELETE FROM dlmm_analyses 
-      WHERE created_at < NOW() - INTERVAL '${daysOld} days'
-    `;
-    const result = await client.query(query);
-    client.release();
-    
-    return Response.json({ 
-      message: `Deleted ${result.rowCount} old records`,
-      deletedCount: result.rowCount 
-    });
-  } catch (error) {
-    return Response.json({ 
-      error: error instanceof Error ? error.message : 'Delete failed' 
-    }, { status: 500 });
-  }
-}
-
-// Optional: Health check endpoint
-export async function HEAD() {
-  try {
-    // Test Redis connection
-    await redis.ping();
-    
-    // Test PostgreSQL connection
-    const client = await pool.connect();
-    await client.query('SELECT 1');
-    client.release();
-    
-    return new Response(null, { 
-      status: 200,
-      headers: { 'X-Health': 'OK' }
-    });
-  } catch (error) {
-    return new Response(null, { 
-      status: 503,
-      headers: { 'X-Health': 'ERROR' }
-    });
-  }
-}

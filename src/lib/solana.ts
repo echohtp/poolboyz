@@ -212,6 +212,7 @@ async getTokenPriceUSD(tokenMint: string) {
     lowerBinId: number;
     liquidityShares: bigint[];
   }, binStep: number, decimalsX: number, decimalsY: number) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const liquidityDistribution: any[] = [];
     let totalLiquidity = BigInt(0);
     
